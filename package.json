@@ -1,0 +1,21 @@
+{
+  "name": "duty-chart-backend",
+  "version": "1.0.0",
+  "description": "GraphQL-backend для графика дежурств",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon index.js 10.76.70.50 4000"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "apollo-server": "2.1.0",
+    "graphql": "14.0.2",
+    "mongoose": "5.6.3"
+  },
+  "devDependencies": {
+    "@types/graphql": "14.0.1",
+    "nodemon": "1.18.4"
+  }
+}
