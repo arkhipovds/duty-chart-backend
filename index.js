@@ -74,18 +74,6 @@ const typeDefs = gql`
 
 //resolvers for graphql
 const resolvers = {
-/*
-  Employee: {
-    lastName: root => {
-        return root.lastName;
-    }
-  },
-  Day: {
-    day: root => {
-        return root.day;
-    }
-  },
-  */
   Query: {
     getEmployees: async (_, args, { Employee }) => {
 	const employees = await modelEmployee.find({});
