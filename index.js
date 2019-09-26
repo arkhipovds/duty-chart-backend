@@ -81,7 +81,6 @@ const resolvers = {
     },
     getAllDays: async (_, args, { Day }) => {
 	    const days = await modelDutyChart.find({});
-	    console.log(days);
     	return days;
     },
     getMonth: async (_, number, { Day }) => {
