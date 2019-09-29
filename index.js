@@ -97,7 +97,7 @@ const typeDefs = gql`
   type Mutation {
     addShift(start:Date, end:Date, employeeId:String): Shift!
     addEmployee(fullName:String, isRegular:Boolean, visibleColor:String): Employee!
-    deleteEmployee(id:String): Employee!
+    deleteEmployee(id:String): Boolean!
   }
 `;
 
@@ -113,7 +113,6 @@ const resolvers = {
 	    const days = await modelShift.find({});
     	return days;
     },
-    
   },
   Mutation: {
     addShift: async (_, { start, end, employeeId }, { Shift }) => {
@@ -133,8 +132,8 @@ const resolvers = {
       return newEmployee;
     },
     deleteEmployee: async (_, { id }, { Employee }) => {
-      await Employee.findOneAndRemove({ _id:id });
-      return await Employee.find({});
+      employee = await modelEmployee.findOneAndRemove({ _id:id });
+      return employee ? true : false;
     },
   }
 };
