@@ -109,7 +109,7 @@ const typeDefs = gql`
   }
   type Query {
     getEmployees: [Employee]
-    getAllShifts: [Shift]
+    getShifts: [Shift]
     getAllDays: [Day]
     getMonth(number: Int): [Day]
   }
@@ -124,14 +124,15 @@ const typeDefs = gql`
 const resolvers = {
   Query: {
     getEmployees: async (_, args, { Employee }) => {
-	    const employees = await modelEmployee.find({});
+      const employees = await modelEmployee.find({});
+      console.log(employees);
 	    return employees;
     },
     getAllDays: async (_, args, { Day }) => {
 	    const days = await modelDutyChart.find({});
     	return days;
     },
-    getAllShifts: async (_, args, { Shift }) => {
+    getShifts: async (_, args, { Shift }) => {
 	    const days = await modelShift.find({});
     	return days;
     },
