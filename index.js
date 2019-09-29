@@ -1,16 +1,52 @@
 //Include external modules
 const { ApolloServer, gql } = require("apollo-server");
 const mongoose = require("mongoose");
+const { GraphQLScalarType } = require("graphql");
+const { Kind } = require("graphql/language");
+
+//Determine type Date for GraphQL
+const resolverMap = {
+  Date: new GraphQLScalarType({
+    name: 'Date',
+    description: 'Date custom scalar type',
+    parseValue(value) {
+      return new Date(value); // value from the client
+    },
+    serialize(value) {
+      return value.getTime(); // value sent to the client
+    },
+    parseLiteral(ast) {
+      if (ast.kind === Kind.INT) {
+        return new Date(ast.value) // ast value is always in string format
+      }
+      return null;
+    },
+  }),
+};
+
+//DB server's parameters
+const DBServer = new Object({
+  host: '10.76.70.51',
+  port: '27017',
+  DB: 'test'
+})
 
 //Determine structure for employees
-const EmployeesSchema = new mongoose.Schema({
-  lastName: {
+const employeeSchema = new mongoose.Schema({
+  fullName: {
     type: String,
     required: true
   },
   isRegular: Boolean,
   visibleColor: String,
   isActive: Boolean
+});
+
+//Determine structure for shifts              !!!!!!!!!!!! employeeId нужно перевести на тип "type: Schema.Types.ObjectId, ref: 'Employee'""
+const shiftSchema = new mongoose.Schema({
+  start: Date,
+  end: Date,
+  employeeId: String
 });
 
 //Determine structure for duty chart
@@ -23,8 +59,10 @@ const DutyChartSchema = new mongoose.Schema({
   nightDutyEmployeeId: String
 });
 
-//Compile models with schema "EmployeesSchema" and collection name "Employees"
-const modelEmployee = mongoose.model("Employees", EmployeesSchema);
+//Compile models with schema "employeeSchema" and collection name "Employees"
+const modelEmployee = mongoose.model("Employees", employeeSchema);
+//Compile models with schema "shiftSchema" and collection name "Shifts"
+const modelShift = mongoose.model("Shifts", shiftSchema);
 //
 const modelDutyChart = mongoose.model("DutyCharts", DutyChartSchema);
 
@@ -39,22 +77,26 @@ mongoose
 
 //Declare types for graphql-queries
 const typeDefs = gql`
-  type Query {
-    """ Get all employees """
-    getEmployees: [Employee]
-    getAllDays: [Day]
-    getMonth(number: Int): [Day]
-  }
+  scalar Date
   type Employee {
     id: String
     """ Last name """
-    lastName: String
+    fullName: String
     """ Is regular employee? """
     isRegular: Boolean
     """ Цвет отображения """
     visibleColor: String
     """ Is not fired """
     isActive: Boolean
+  }
+  type Shift {
+    id: String
+    """ When shift starts """
+    start: Date
+    """ When shift ends """
+    end: Date
+    """ Id of employee who is responsible for the shift"""
+    employeeId: String
   }
   type Day {
     id: String
@@ -65,10 +107,16 @@ const typeDefs = gql`
     dayDutyEmployeeId: String
     nightDutyEmployeeId: String
   }
+  type Query {
+    getEmployees: [Employee]
+    getAllShifts: [Shift]
+    getAllDays: [Day]
+    getMonth(number: Int): [Day]
+  }
   type Mutation {
-    addEmployee(lastName:String, isRegular:Boolean): Employee!
+    addEmployee(fullName:String, isRegular:Boolean): Employee!
+    addShift(start:Date, end:Date, employeeId:String): Shift!
     deleteEmployee(id:String): Employee!
-    addDay(dayNumber:Int, monthNumber:Int, yearNumber:Int): Day!
   }
 `;
 
@@ -83,6 +131,10 @@ const resolvers = {
 	    const days = await modelDutyChart.find({});
     	return days;
     },
+    getAllShifts: async (_, args, { Shift }) => {
+	    const days = await modelShift.find({});
+    	return days;
+    },
     getMonth: async (_, number, { Day }) => {
 	    var days = [];
 	    days = await modelDutyChart.find({
@@ -92,33 +144,25 @@ const resolvers = {
     }
   },
   Mutation: {
-    addEmployee: async (_, { lastName, isRegular }, { Employee }) => {
+    addEmployee: async (_, { fullName, isRegular }, { Employee }) => {
       const newEmployee = await new modelEmployee({
-        lastName,
+        fullName,
         isRegular
       }).save();
       return newEmployee;
+    },
+    addShift: async (_, { start, end, employeeId }, { Shift }) => {
+      const newShift = await new modelShift({
+        start,
+        end,
+        employeeId
+      }).save();
+      return newShift;
     },
     deleteEmployee: async (_, { id }, { Employee }) => {
       await Employee.findOneAndRemove({ _id:id });
       return await Employee.find({});
     },
-    addDay: async (_, { dayNumber, monthNumber, yearNumber }, { Day }) => {
-      const sameDay = await modelDutyChart.findOne({
-        day:dayNumber,
-        month:monthNumber,
-        year:yearNumber
-      });
-      if(sameDay){
-        throw new Error('Day is already exists');
-      }
-      const newDay = await new modelDutyChart({
-        day:dayNumber,
-        month:monthNumber,
-        year:yearNumber
-      }).save();
-      return newDay;
-    }
   }
 };
 
