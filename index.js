@@ -39,7 +39,11 @@ const employeeSchema = new mongoose.Schema({
   },
   isRegular: Boolean,
   visibleColor: String,
-  isActive: Boolean
+  isActive: {
+    type: Boolean,
+    default: true
+  }
+  
 });
 
 //Determine structure for shifts              !!!!!!!!!!!! employeeId нужно перевести на тип "type: Schema.Types.ObjectId, ref: 'Employee'""
@@ -49,22 +53,10 @@ const shiftSchema = new mongoose.Schema({
   employeeId: String
 });
 
-//Determine structure for duty chart
-const DutyChartSchema = new mongoose.Schema({
-  day: Number,
-  month: Number,
-  year: Number,
-  isWeekday: Boolean,
-  dayDutyEmployeeId: String,
-  nightDutyEmployeeId: String
-});
-
 //Compile models with schema "employeeSchema" and collection name "Employees"
 const modelEmployee = mongoose.model("Employees", employeeSchema);
 //Compile models with schema "shiftSchema" and collection name "Shifts"
 const modelShift = mongoose.model("Shifts", shiftSchema);
-//
-const modelDutyChart = mongoose.model("DutyCharts", DutyChartSchema);
 
 //connect to mongodb-server 10.76.70.51 on port 27017 to DB "test"         !!!!!!!!!!!!вынести все в параметры
 mongoose
@@ -98,24 +90,13 @@ const typeDefs = gql`
     """ Id of employee who is responsible for the shift"""
     employeeId: String
   }
-  type Day {
-    id: String
-    day: Int!
-    month: Int!
-    year: Int!
-    isWeekday: Boolean
-    dayDutyEmployeeId: String
-    nightDutyEmployeeId: String
-  }
   type Query {
-    getEmployees: [Employee]
-    getShifts: [Shift]
-    getAllDays: [Day]
-    getMonth(number: Int): [Day]
+    Employees: [Employee]
+    Shifts: [Shift]
   }
   type Mutation {
-    addEmployee(fullName:String, isRegular:Boolean): Employee!
     addShift(start:Date, end:Date, employeeId:String): Shift!
+    addEmployee(fullName:String, isRegular:Boolean, visibleColor:String): Employee!
     deleteEmployee(id:String): Employee!
   }
 `;
@@ -123,35 +104,18 @@ const typeDefs = gql`
 //resolvers for graphql
 const resolvers = {
   Query: {
-    getEmployees: async (_, args, { Employee }) => {
-      const employees = await modelEmployee.find({});
+    Employees: async (_, args, { Employee }) => {
+      const employees = await modelEmployee.find({ isActive:true});
       console.log(employees);
 	    return employees;
     },
-    getAllDays: async (_, args, { Day }) => {
-	    const days = await modelDutyChart.find({});
-    	return days;
-    },
-    getShifts: async (_, args, { Shift }) => {
+    Shifts: async (_, args, { Shift }) => {
 	    const days = await modelShift.find({});
     	return days;
     },
-    getMonth: async (_, number, { Day }) => {
-	    var days = [];
-	    days = await modelDutyChart.find({
-	      month:number.number
-	    });
-	    return days;
-    }
+    
   },
   Mutation: {
-    addEmployee: async (_, { fullName, isRegular }, { Employee }) => {
-      const newEmployee = await new modelEmployee({
-        fullName,
-        isRegular
-      }).save();
-      return newEmployee;
-    },
     addShift: async (_, { start, end, employeeId }, { Shift }) => {
       const newShift = await new modelShift({
         start,
@@ -159,6 +123,14 @@ const resolvers = {
         employeeId
       }).save();
       return newShift;
+    },
+    addEmployee: async (_, { fullName, isRegular, visibleColor }, { Employee }) => {
+      const newEmployee = await new modelEmployee({
+        fullName,
+        isRegular,
+        visibleColor
+      }).save();
+      return newEmployee;
     },
     deleteEmployee: async (_, { id }, { Employee }) => {
       await Employee.findOneAndRemove({ _id:id });
