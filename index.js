@@ -1,6 +1,11 @@
 //Include external modules
 const { ApolloServer, gql } = require("apollo-server");
 const mongoose = require("mongoose");
+
+/* 
+//Этот блок, конечно, интересный, но дата в строку выводится с разделителем 'T' 
+//между датой и временем, так что пока сменил тип данных на String
+
 const { GraphQLScalarType } = require("graphql");
 const { Kind } = require("graphql/language");
 
@@ -23,8 +28,9 @@ const resolverMap = {
     },
   }),
 };
+*/
 
-//DB server's parameters
+//DB server's parameters                 !!!!!!!!!!!!!!!!!!!!!!!!!!TODO заюзать это в коде
 const DBServer = new Object({
   host: '10.76.70.51',
   port: '27017',
@@ -48,8 +54,8 @@ const employeeSchema = new mongoose.Schema({
 
 //Determine structure for shifts              !!!!!!!!!!!! employeeId нужно перевести на тип "type: Schema.Types.ObjectId, ref: 'Employee'""
 const shiftSchema = new mongoose.Schema({
-  start: Date,
-  end: Date,
+  start: String,
+  end: String,
   employeeId: String
 });
 
@@ -84,9 +90,9 @@ const typeDefs = gql`
   type Shift {
     id: String
     """ When shift starts """
-    start: Date
+    start: String
     """ When shift ends """
-    end: Date
+    end: String
     """ Id of employee who is responsible for the shift"""
     employeeId: String
   }
@@ -95,8 +101,11 @@ const typeDefs = gql`
     Shifts: [Shift]
   }
   type Mutation {
-    addShift(start:Date, end:Date, employeeId:String): Shift!
+    addShift(start:String, end:String, employeeId:String): Shift!
+    deleteShift(id:String): Boolean!
+
     addEmployee(fullName:String, isRegular:Boolean, visibleColor:String): Employee!
+    updateEmployee(id:String, fullName:String, isRegular:Boolean, visibleColor:String): Employee!
     deleteEmployee(id:String): Boolean!
   }
 `;
@@ -123,6 +132,11 @@ const resolvers = {
       }).save();
       return newShift;
     },
+    deleteShift: async (_, { id }, { Shift }) => {
+      shift = await modelShift.findOneAndRemove({ _id:id });
+      return shift ? true : false;
+    },
+
     addEmployee: async (_, { fullName, isRegular, visibleColor }, { Employee }) => {
       const newEmployee = await new modelEmployee({
         fullName,
@@ -131,6 +145,18 @@ const resolvers = {
       }).save();
       return newEmployee;
     },
+    updateEmployee: async (_, { id, fullName, isRegular, visibleColor }, { Employee }) => {
+      let employee = await modelEmployee.findOneAndUpdate(
+        {_id:id}, 
+        {
+          fullName:fullName, 
+          isRegular:isRegular, 
+          visibleColor:visibleColor
+        },
+        {new: true}
+      );
+      return employee;
+    },    
     deleteEmployee: async (_, { id }, { Employee }) => {
       employee = await modelEmployee.findOneAndRemove({ _id:id });
       return employee ? true : false;
