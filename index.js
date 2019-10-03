@@ -3,8 +3,7 @@ const { ApolloServer, gql } = require("apollo-server");
 const mongoose = require("mongoose");
 
 /* 
-//Этот блок, конечно, интересный, но дата в строку выводится с разделителем 'T' 
-//между датой и временем, так что пока сменил тип данных на String
+//TODO вернуться к работе с форматом Date
 
 const { GraphQLScalarType } = require("graphql");
 const { Kind } = require("graphql/language");
@@ -102,6 +101,7 @@ const typeDefs = gql`
   }
   type Mutation {
     addShift(start:String, end:String, employeeId:String): Shift!
+    updateShift(id:String, start:String, end:String, employeeId:String): Shift!
     deleteShift(id:String): Boolean!
 
     addEmployee(fullName:String, isRegular:Boolean, visibleColor:String): Employee!
@@ -132,6 +132,18 @@ const resolvers = {
       }).save();
       return newShift;
     },
+    updateShift: async (_, { id, start, end, employeeId }, { Shift }) => {
+      let shift = await modelShift.findOneAndUpdate(
+        {_id:id}, 
+        {
+          start:start, 
+          end:end, 
+          employeeId:employeeId
+        },
+        {new: true}
+      );
+      return shift;
+    },
     deleteShift: async (_, { id }, { Shift }) => {
       shift = await modelShift.findOneAndRemove({ _id:id });
       return shift ? true : false;
@@ -156,7 +168,7 @@ const resolvers = {
         {new: true}
       );
       return employee;
-    },    
+    },
     deleteEmployee: async (_, { id }, { Employee }) => {
       employee = await modelEmployee.findOneAndRemove({ _id:id });
       return employee ? true : false;
