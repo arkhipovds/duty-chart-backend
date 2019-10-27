@@ -55,7 +55,8 @@ const employeeSchema = new mongoose.Schema({
 const shiftSchema = new mongoose.Schema({
   start: String,
   end: String,
-  employeeId: String
+  employeeId: String,
+  test: Date
 });
 
 //Compile models with schema "employeeSchema" and collection name "Employees"
@@ -94,10 +95,13 @@ const typeDefs = gql`
     end: String
     """ Id of employee who is responsible for the shift"""
     employeeId: String
+    test: Date
   }
   type Query {
     Employees: [Employee]
+    activeEmployees: [Employee]
     Shifts: [Shift]
+    shiftsForMonth (month:String): [Shift]
   }
   type Mutation {
     addShift(start:String, end:String, employeeId:String): Shift!
@@ -114,11 +118,21 @@ const typeDefs = gql`
 const resolvers = {
   Query: {
     Employees: async (_, args, { Employee }) => {
+      const employees = await modelEmployee.find();
+      console.log(employees);
+	    return employees;
+    },
+    activeEmployees: async (_, args, { Employee }) => {
       const employees = await modelEmployee.find({ isActive:true});
       console.log(employees);
 	    return employees;
     },
+    //TODO отдавать смены за период, а не все
     Shifts: async (_, args, { Shift }) => {
+	    const days = await modelShift.find({});
+    	return days;
+    },
+    shiftsForMonth: async (_, {month}, { Shift }) => {
 	    const days = await modelShift.find({});
     	return days;
     },
@@ -170,7 +184,13 @@ const resolvers = {
       return employee;
     },
     deleteEmployee: async (_, { id }, { Employee }) => {
-      employee = await modelEmployee.findOneAndRemove({ _id:id });
+      let employee = await modelEmployee.findOneAndUpdate(
+        {_id:id}, 
+        {
+          isActive:false
+        },
+        {new: true}
+      );
       return employee ? true : false;
     },
   }
