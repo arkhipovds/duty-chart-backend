@@ -74,6 +74,7 @@ const typeDefs = gql`
   type Employee {
     id: String
     fullName: String
+    ADLogin: String
     isRegular: Boolean
     visibleColor: String
     isActive: Boolean
@@ -101,12 +102,14 @@ const typeDefs = gql`
 
     addEmployee(
       fullName: String
+      ADLogin: String
       isRegular: Boolean
       visibleColor: String
     ): Employee!
     updateEmployee(
       id: String
       fullName: String
+      ADLogin: String
       isRegular: Boolean
       visibleColor: String
     ): Employee!
@@ -166,11 +169,12 @@ const resolvers = {
 
     addEmployee: async (
       _,
-      { fullName, isRegular, visibleColor },
+      { fullName, ADLogin, isRegular, visibleColor },
       { Employee }
     ) => {
       const newEmployee = await new modelEmployee({
         fullName,
+        ADLogin,
         isRegular,
         visibleColor
       }).save();
@@ -178,13 +182,14 @@ const resolvers = {
     },
     updateEmployee: async (
       _,
-      { id, fullName, isRegular, visibleColor },
+      { id, fullName, ADLogin, isRegular, visibleColor },
       { Employee }
     ) => {
       let employee = await modelEmployee.findOneAndUpdate(
         { _id: id },
         {
           fullName: fullName,
+          ADLogin: ADLogin,
           isRegular: isRegular,
           visibleColor: visibleColor
         },
