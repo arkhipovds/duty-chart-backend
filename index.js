@@ -18,12 +18,25 @@ const employeeSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  ADLogin: String, //TODO обработать в бекенде и фронтенде
   isRegular: Boolean,
   visibleColor: String,
   isActive: {
     type: Boolean,
     default: true
   }
+});
+
+//Determine structure for events   !!!!!!!!!!!!!!!!!!!!!! TODO: убрать это в забикс-коннектор
+const eventSchema = new mongoose.Schema({
+  tsStart: Number,
+  tsAck: Number,
+  tsEnd: Number,
+  login: String,
+  text: String,
+  host: String,
+  severity: Number,
+  isForgiven: Boolean
 });
 
 //Determine structure for shifts              !!!!!!!!!!!! TODO: employeeId нужно перевести на тип "type: Schema.Types.ObjectId, ref: 'Employee'""
