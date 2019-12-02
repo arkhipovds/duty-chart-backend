@@ -18,25 +18,13 @@ const employeeSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  ADLogin: String, //TODO обработать в бекенде и фронтенде
+  ADLogin: String,
   isRegular: Boolean,
   visibleColor: String,
   isActive: {
     type: Boolean,
     default: true
   }
-});
-
-//Determine structure for events   !!!!!!!!!!!!!!!!!!!!!! TODO: убрать это в забикс-коннектор
-const eventSchema = new mongoose.Schema({
-  tsStart: Number,
-  tsAck: Number,
-  tsEnd: Number,
-  login: String,
-  text: String,
-  host: String,
-  severity: Number,
-  isForgiven: Boolean
 });
 
 //Determine structure for shifts              !!!!!!!!!!!! TODO: employeeId нужно перевести на тип "type: Schema.Types.ObjectId, ref: 'Employee'""
@@ -46,10 +34,34 @@ const shiftSchema = new mongoose.Schema({
   employeeId: String
 });
 
+//Determine structure for events
+const schemaEvent = new mongoose.Schema({
+  //Timestamp of event's start
+  tsStart: Number,
+  //Timestamp of event's ack
+  tsAck: Number,
+  //Timestamp of event's end
+  tsEnd: Number,
+  //User login in Active Directory
+  ADlogin: String,
+  //Event's text
+  text: String,
+  //Event's host
+  host: String,
+  //Event's severity
+  severity: Number,
+  //Is event checked in time
+  isInTime: Boolean,
+  //Is user forgiven ))
+  isForgiven: Boolean
+});
+
 //Compile model with schema "employeeSchema" and collection name "Employees"
 const modelEmployee = mongoose.model("Employees", employeeSchema);
 //Compile model with schema "shiftSchema" and collection name "Shifts"
 const modelShift = mongoose.model("Shifts", shiftSchema);
+//Compile model with schema "schemaEvent" and collection name "Events"
+const modelEvent = mongoose.model("Events", schemaEvent);
 
 //connect to mongodb-server
 mongoose
@@ -85,10 +97,24 @@ const typeDefs = gql`
     end: String
     employeeId: String
   }
+  type Event {
+    id: String
+    tsStart: String
+    tsAck: String
+    tsEnd: String
+    ADlogin: String
+    text: String
+    host: String
+    severity: String
+    isInTime: Boolean
+    isForgiven: Boolean
+  }
   type Query {
     Employees: [Employee]
     activeEmployees: [Employee]
     Shifts(utPointInMonth: String): [Shift]
+    events: [Event]
+    maxEventTime: String
   }
   type Mutation {
     addShift(start: String, end: String, employeeId: String): Shift!
@@ -131,12 +157,21 @@ const resolvers = {
     Shifts: async (_, { utPointInMonth }, { Shift }) => {
       //Задаем отклонение от указанного времени 40 суток
       const delta = 3456000000;
-      console.log(msToDateString(utPointInMonth));
-      console.log(utPointInMonth);
       const days = await modelShift.find({
         start: { $gte: utPointInMonth - delta, $lte: utPointInMonth + delta }
       });
       return days;
+    },
+    events: async (_, args, { Event }) => {
+      const events = await modelEvent.find();
+      return events;
+    },
+    maxEventTime: async (_, args, { Event }) => {
+      const maxTS = await modelEvent
+        .find()
+        .sort("-tsStart")
+        .limit(1);
+      return maxTS[0].tsStart;
     }
   },
   Mutation: {
