@@ -9,6 +9,9 @@ const parameters = new Object({
   DBName: "test"
 });
 
+//Макс. время реакции
+var maxAckTime = 1000 * 60 * 10;
+
 parameters.host = process.argv[2] ? process.argv[2] : "localhost";
 parameters.port = process.argv[3] ? process.argv[3] : "4000";
 
@@ -26,14 +29,22 @@ const employeeSchema = new mongoose.Schema({
     default: true
   }
 });
-
 //Determine structure for shifts              !!!!!!!!!!!! TODO: employeeId нужно перевести на тип "type: Schema.Types.ObjectId, ref: 'Employee'""
 const shiftSchema = new mongoose.Schema({
   start: Number,
   end: Number,
-  employeeId: String
+  employeeId: String,
+  //События, подтвержденные вовремя
+  ackInTimeEventsCount: Number,
+  //События, подтвержденные невовремя
+  ackNotInTimeEventsCount: Number,
+  //Не подтвержденные события
+  noAckEventsCount: Number,
+  //Слишком короткие события
+  tooShortEventsCount: Number,
+  //Всего событий за смену
+  normalEventsCount: Number
 });
-
 //Determine structure for events
 const schemaEvent = new mongoose.Schema({
   //Timestamp of event's start
@@ -50,8 +61,8 @@ const schemaEvent = new mongoose.Schema({
   host: String,
   //Event's severity
   severity: Number,
-  //Is event checked in time
-  isInTime: Boolean,
+  //Duration without check
+  freeDuration: Number,
   //Is user forgiven ))
   isForgiven: Boolean
 });
@@ -96,6 +107,11 @@ const typeDefs = gql`
     start: String
     end: String
     employeeId: String
+    ackInTimeEventsCount: String
+    ackNotInTimeEventsCount: String
+    noAckEventsCount: String
+    tooShortEventsCount: String
+    normalEventsCount: String
   }
   type Event {
     id: String
@@ -106,7 +122,7 @@ const typeDefs = gql`
     text: String
     host: String
     severity: String
-    isInTime: Boolean
+    freeDuration: String
     isForgiven: Boolean
   }
   type Query {
@@ -182,6 +198,7 @@ const resolvers = {
         end,
         employeeId
       }).save();
+      calculateIndicatorsForShift(newShift._id);
       return newShift;
     },
     //TODO запретить смены длиннее 48 часов и отрицательные смены
@@ -195,6 +212,7 @@ const resolvers = {
         },
         { new: true }
       );
+      calculateIndicatorsForShift(shift._id);
       return shift;
     },
     deleteShift: async (_, { id }, { Shift }) => {
@@ -244,27 +262,61 @@ const resolvers = {
     }
   }
 };
-
 //create new Apollo server
 const server = new ApolloServer({
   typeDefs,
   resolvers,
   context: { modelEmployee }
 });
-
 //start it
 server
   .listen({ host: parameters.host, port: parameters.port })
   .then(({ url }) => {
     console.log(`Ready for GraphQL-queries on ${url}`);
   });
+//
+async function calculateIndicatorsForShift(shiftId) {
+  var tempArray = await modelShift.find({ _id: shiftId }).limit(1);
+  const tempShift = tempArray[0];
 
-//Преобразовывает UNIX-time (в мс) в строку в формате "YYYY-MM-DD HH:MM"
-function msToDateString(ms) {
-  const tempDate = new Date(Number.parseInt(ms));
-  const tempString =
-    tempDate.toISOString().slice(0, 10) +
-    " " +
-    tempDate.toISOString().slice(11, 16);
-  return tempString;
+  var tempArray = await modelEvent
+    .find({ tsStart: { $gte: tempShift.end } })
+    .sort("tsStart")
+    .limit(1);
+
+  if (tempArray.length > 0) {
+    tempArray = await modelEvent
+      .find({ tsStart: { $gte: tempShift.start, $lte: tempShift.end } })
+      .sort("tsStart");
+    console.log("Событий за смену " + tempArray.length);
+    var ackInTimeEventsCount = 0;
+    var ackNotInTimeEventsCount = 0;
+    var tooShortEventsCount = 0;
+    var noAckEventsCount = 0;
+    for (i in tempArray) {
+      if (tempArray[i].tsAck > 0) {
+        if (tempArray[i].freeDuration <= maxAckTime) {
+          ackInTimeEventsCount++;
+        } else {
+          ackNotInTimeEventsCount++;
+        }
+      } else {
+        if (tempArray[i].freeDuration <= maxAckTime) {
+          tooShortEventsCount++;
+        } else {
+          noAckEventsCount++;
+        }
+      }
+    }
+    await modelShift.findOneAndUpdate(
+      { _id: shiftId },
+      {
+        ackInTimeEventsCount: ackInTimeEventsCount,
+        ackNotInTimeEventsCount: ackNotInTimeEventsCount,
+        noAckEventsCount: noAckEventsCount,
+        tooShortEventsCount: tooShortEventsCount,
+        normalEventsCount: tempArray.length - tooShortEventsCount
+      }
+    );
+  }
 }
