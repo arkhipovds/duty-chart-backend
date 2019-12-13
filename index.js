@@ -128,6 +128,7 @@ const typeDefs = gql`
   type Query {
     Employees: [Employee]
     activeEmployees: [Employee]
+    thisMonthEmployeesId: [String]
     Shifts(utPointInMonth: String): [Shift]
     events: [Event]
     maxEventTime: String
@@ -169,6 +170,12 @@ const resolvers = {
     activeEmployees: async (_, args, { Employee }) => {
       const employees = await modelEmployee.find({ isActive: true });
       return employees;
+    },
+    thisMonthEmployeesId: async (_, { TS }, { Employee }) => {
+      var theDate = new Date(TS);
+      
+      const days = await modelShift.find();
+      return days;
     },
     Shifts: async (_, { utPointInMonth }, { Shift }) => {
       //Задаем отклонение от указанного времени 40 суток
