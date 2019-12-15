@@ -29,7 +29,7 @@ const employeeSchema = new mongoose.Schema({
     default: true
   }
 });
-//Determine structure for shifts              !!!!!!!!!!!! TODO: employeeId нужно перевести на тип "type: Schema.Types.ObjectId, ref: 'Employee'""
+//Determine structure for shifts
 const shiftSchema = new mongoose.Schema({
   start: Number,
   end: Number,
@@ -38,15 +38,32 @@ const shiftSchema = new mongoose.Schema({
   ackInTimeEventsCount: Number,
   //События, подтвержденные невовремя
   ackNotInTimeEventsCount: Number,
-  //Не подтвержденные события
+  //Неподтвержденные события
   noAckEventsCount: Number,
   //Слишком короткие события
   tooShortEventsCount: Number,
   //Всего событий за смену
   normalEventsCount: Number
 });
+//Determine structure for scoring
+const scoringSchema = new mongoose.Schema({
+  //Id оцениваемого сотрудника
+  employeeId: String,
+  //Момент внутри месяца, за который посталвена оценка
+  TS: String,
+  //События, подтвержденные вовремя
+  ackInTimeEventsCount: Number,
+  //События, подтвержденные невовремя
+  ackNotInTimeEventsCount: Number,
+  //Неподтвержденные события
+  noAckEventsCount: Number,
+  //Слишком короткие события
+  tooShortEventsCount: Number,
+  //Всего событий
+  normalEventsCount: Number
+});
 //Determine structure for events
-const schemaEvent = new mongoose.Schema({
+const eventSchema = new mongoose.Schema({
   //Timestamp of event's start
   tsStart: Number,
   //Timestamp of event's ack
@@ -71,8 +88,10 @@ const schemaEvent = new mongoose.Schema({
 const modelEmployee = mongoose.model("Employees", employeeSchema);
 //Compile model with schema "shiftSchema" and collection name "Shifts"
 const modelShift = mongoose.model("Shifts", shiftSchema);
-//Compile model with schema "schemaEvent" and collection name "Events"
-const modelEvent = mongoose.model("Events", schemaEvent);
+//Compile model with schema "eventSchema" and collection name "Events"
+const modelEvent = mongoose.model("Events", eventSchema);
+//Compile model with schema "schemaScoring" and collection name "Scoring"
+const modelScoring = mongoose.model("Scoring", scoringSchema);
 
 //connect to mongodb-server
 mongoose
@@ -113,6 +132,16 @@ const typeDefs = gql`
     tooShortEventsCount: String
     normalEventsCount: String
   }
+  type Scoring {
+    id: String
+    TS: String
+    ackInTimeEventsCount: String
+    ackNotInTimeEventsCount: String
+    noAckEventsCount: String
+    tooShortEventsCount: String
+    normalEventsCount: String
+    employeeId: String
+  }
   type Event {
     id: String
     tsStart: String
@@ -128,9 +157,12 @@ const typeDefs = gql`
   type Query {
     Employees: [Employee]
     activeEmployees: [Employee]
-    thisMonthEmployeesId: [String]
-    Shifts(utPointInMonth: String): [Shift]
-    events: [Event]
+
+    scorings(TS: String): [Scoring]
+
+    Shifts(TS: String): [Shift]
+
+    events(TS: String, employeeId: String): [Event]
     maxEventTime: String
   }
   type Mutation {
@@ -157,6 +189,8 @@ const typeDefs = gql`
       visibleColor: String
     ): Employee!
     deleteEmployee(id: String): Boolean!
+
+    calculateScorings(TS: String): String!
   }
 `;
 
@@ -171,22 +205,35 @@ const resolvers = {
       const employees = await modelEmployee.find({ isActive: true });
       return employees;
     },
-    thisMonthEmployeesId: async (_, { TS }, { Employee }) => {
-      var theDate = new Date(TS);
-      
-      const days = await modelShift.find();
-      return days;
+    scorings: async (_, { TS }, { Shift }) => {
+      const month = getMonthsBorders(TS);
+      const scorings = await modelScoring.find({
+        TS: { $gte: month.start, $lt: month.end }
+      });
+      return scorings;
     },
-    Shifts: async (_, { utPointInMonth }, { Shift }) => {
+    Shifts: async (_, { TS }, { Shift }) => {
       //Задаем отклонение от указанного времени 40 суток
-      const delta = 3456000000;
+      const delta = 1000 * 60 * 60 * 24 * 40;
       const days = await modelShift.find({
-        start: { $gte: utPointInMonth - delta, $lte: utPointInMonth + delta }
+        start: { $gte: TS - delta, $lt: TS + delta }
       });
       return days;
     },
-    events: async (_, args, { Event }) => {
-      const events = await modelEvent.find();
+    events: async (_, { TS, employeeId }, { Event }) => {
+      const month = getMonthsBorders(TS);
+      const shifts = await modelShift.find({
+        start: { $gte: month.start, $lt: month.end },
+        employeeId: employeeId
+      });
+      var events = [];
+      for (i in shifts) {
+        events = events.concat(
+          await modelEvent.find({
+            tsStart: { $gte: shifts[i].start, $lt: shifts[i].end }
+          })
+        );
+      }
       return events;
     },
     maxEventTime: async (_, args, { Event }) => {
@@ -205,7 +252,7 @@ const resolvers = {
         end,
         employeeId
       }).save();
-      calculateIndicatorsForShift(newShift._id);
+      calculateScoringForShift(newShift._id);
       return newShift;
     },
     //TODO запретить смены длиннее 48 часов и отрицательные смены
@@ -219,14 +266,13 @@ const resolvers = {
         },
         { new: true }
       );
-      calculateIndicatorsForShift(shift._id);
+      calculateScoringForShift(shift._id);
       return shift;
     },
     deleteShift: async (_, { id }, { Shift }) => {
       shift = await modelShift.findOneAndRemove({ _id: id });
       return shift ? true : false;
     },
-
     addEmployee: async (
       _,
       { fullName, ADLogin, isRegular, visibleColor },
@@ -266,6 +312,67 @@ const resolvers = {
         { new: true }
       );
       return employee ? true : false;
+    },
+    calculateScorings: async (_, { TS }, { Employee }) => {
+      //Ищем края месяца
+      const month = getMonthsBorders(TS);
+      //Для всех смен в месяце считаем показатели
+      await calculateScoringsForShiftsForMonth(TS);
+      //Собираем список сотрудников
+      var ids = await thisMonthEmployeesId(TS);
+      //Перебираем сотрудников
+      for (var k in ids) {
+        const shifts = await modelShift.find({
+          start: { $gte: month.start, $lt: month.end },
+          employeeId: ids[k]
+        });
+        var ackInTimeEventsCount = 0;
+        var ackNotInTimeEventsCount = 0;
+        var noAckEventsCount = 0;
+        var tooShortEventsCount = 0;
+        var normalEventsCount = 0;
+        for (i in shifts) {
+          if (shifts[i].normalEventsCount || shifts[i].tooShortEventsCount) {
+            ackInTimeEventsCount += shifts[i].ackInTimeEventsCount;
+            ackNotInTimeEventsCount += shifts[i].ackNotInTimeEventsCount;
+            noAckEventsCount += shifts[i].noAckEventsCount;
+            tooShortEventsCount += shifts[i].tooShortEventsCount;
+            normalEventsCount += shifts[i].normalEventsCount;
+          }
+        }
+        //Ищем оценку по этому сотруднику за этот месяц
+        var scoring = await modelScoring.find({
+          TS: { $gte: month.start, $lt: month.end },
+          employeeId: ids[k]
+        });
+        if (scoring.length > 0) {
+          scoring = await modelScoring.findOneAndUpdate(
+            { _id: scoring[0]._id },
+            {
+              employeeId: ids[k],
+              TS: month.start,
+              ackInTimeEventsCount: ackInTimeEventsCount,
+              ackNotInTimeEventsCount: ackNotInTimeEventsCount,
+              noAckEventsCount: noAckEventsCount,
+              tooShortEventsCount: tooShortEventsCount,
+              normalEventsCount: normalEventsCount
+            },
+            { new: true }
+          );
+        } else {
+          await new modelScoring({
+            employeeId: ids[k],
+            TS: month.start,
+            ackInTimeEventsCount: ackInTimeEventsCount,
+            ackNotInTimeEventsCount: ackNotInTimeEventsCount,
+            noAckEventsCount: noAckEventsCount,
+            tooShortEventsCount: tooShortEventsCount,
+            normalEventsCount: normalEventsCount
+          }).save();
+        }
+      }
+      k++;
+      return k.toString();
     }
   }
 };
@@ -281,21 +388,34 @@ server
   .then(({ url }) => {
     console.log(`Ready for GraphQL-queries on ${url}`);
   });
-//
-async function calculateIndicatorsForShift(shiftId) {
+//Для указанного месяца выдает список id сотрудников, которые дежурили
+async function thisMonthEmployeesId(TS) {
+  const month = getMonthsBorders(TS);
+  const shifts = await modelShift.find({
+    start: { $gte: month.start, $lt: month.end }
+  });
+  var ids = [];
+  for (i in shifts) {
+    //Если такого id еще нет в массиве
+    if (ids.indexOf(shifts[i].employeeId) == -1) {
+      //То добавляем его
+      ids.push(shifts[i].employeeId);
+    }
+  }
+  return ids;
+}
+//Расчитать показатели для смены
+async function calculateScoringForShift(shiftId) {
   var tempArray = await modelShift.find({ _id: shiftId }).limit(1);
   const tempShift = tempArray[0];
-
   var tempArray = await modelEvent
     .find({ tsStart: { $gte: tempShift.end } })
     .sort("tsStart")
     .limit(1);
-
   if (tempArray.length > 0) {
     tempArray = await modelEvent
-      .find({ tsStart: { $gte: tempShift.start, $lte: tempShift.end } })
+      .find({ tsStart: { $gte: tempShift.start, $lt: tempShift.end } })
       .sort("tsStart");
-    console.log("Событий за смену " + tempArray.length);
     var ackInTimeEventsCount = 0;
     var ackNotInTimeEventsCount = 0;
     var tooShortEventsCount = 0;
@@ -326,4 +446,26 @@ async function calculateIndicatorsForShift(shiftId) {
       }
     );
   }
+}
+//Расчитать показатели для всех смен за месяц
+async function calculateScoringsForShiftsForMonth(TS) {
+  //Ищем края месяца
+  const month = getMonthsBorders(TS);
+  //Собираем список смен за месяц
+  const shifts = await modelShift.find({
+    start: { $gte: month.start, $lt: month.end }
+  });
+  //Перебираем смены
+  for (i in shifts) {
+    //Для каждой смены считаем показатели
+    calculateScoringForShift(shifts[i]._id);
+  }
+}
+function getMonthsBorders(TS) {
+  var theDate = new Date(Number.parseInt(TS));
+  //Расчитываем начало месяца
+  var theStart = new Date(theDate.getFullYear(), theDate.getMonth());
+  //Расчитываем конец месяца
+  var theEnd = new Date(theStart.getFullYear(), theStart.getMonth() + 1);
+  return { start: theStart.getTime(), end: theEnd.getTime() };
 }
