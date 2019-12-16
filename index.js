@@ -43,7 +43,9 @@ const shiftSchema = new mongoose.Schema({
   //Слишком короткие события
   tooShortEventsCount: Number,
   //Всего событий за смену
-  normalEventsCount: Number
+  normalEventsCount: Number,
+  //Суммарная длительность, когда события оставались без подтверждения
+  freeDurationSum: Number
 });
 //Determine structure for scoring
 const scoringSchema = new mongoose.Schema({
@@ -60,7 +62,9 @@ const scoringSchema = new mongoose.Schema({
   //Слишком короткие события
   tooShortEventsCount: Number,
   //Всего событий
-  normalEventsCount: Number
+  normalEventsCount: Number,
+  //Суммарная длительность, когда события оставались без подтверждения
+  freeDurationSum: Number
 });
 //Determine structure for events
 const eventSchema = new mongoose.Schema({
@@ -131,6 +135,7 @@ const typeDefs = gql`
     noAckEventsCount: String
     tooShortEventsCount: String
     normalEventsCount: String
+    freeDurationSum: String
   }
   type Scoring {
     id: String
@@ -140,6 +145,7 @@ const typeDefs = gql`
     noAckEventsCount: String
     tooShortEventsCount: String
     normalEventsCount: String
+    freeDurationSum: String
     employeeId: String
   }
   type Event {
@@ -331,6 +337,7 @@ const resolvers = {
         var noAckEventsCount = 0;
         var tooShortEventsCount = 0;
         var normalEventsCount = 0;
+        var freeDurationSum = 0;
         for (i in shifts) {
           if (shifts[i].normalEventsCount || shifts[i].tooShortEventsCount) {
             ackInTimeEventsCount += shifts[i].ackInTimeEventsCount;
@@ -338,6 +345,7 @@ const resolvers = {
             noAckEventsCount += shifts[i].noAckEventsCount;
             tooShortEventsCount += shifts[i].tooShortEventsCount;
             normalEventsCount += shifts[i].normalEventsCount;
+            freeDurationSum += shifts[i].freeDurationSum;
           }
         }
         //Ищем оценку по этому сотруднику за этот месяц
@@ -355,7 +363,8 @@ const resolvers = {
               ackNotInTimeEventsCount: ackNotInTimeEventsCount,
               noAckEventsCount: noAckEventsCount,
               tooShortEventsCount: tooShortEventsCount,
-              normalEventsCount: normalEventsCount
+              normalEventsCount: normalEventsCount,
+              freeDurationSum: freeDurationSum
             },
             { new: true }
           );
@@ -367,7 +376,8 @@ const resolvers = {
             ackNotInTimeEventsCount: ackNotInTimeEventsCount,
             noAckEventsCount: noAckEventsCount,
             tooShortEventsCount: tooShortEventsCount,
-            normalEventsCount: normalEventsCount
+            normalEventsCount: normalEventsCount,
+            freeDurationSum: freeDurationSum
           }).save();
         }
       }
@@ -406,31 +416,38 @@ async function thisMonthEmployeesId(TS) {
 }
 //Расчитать показатели для смены
 async function calculateScoringForShift(shiftId) {
-  var tempArray = await modelShift.find({ _id: shiftId }).limit(1);
-  const tempShift = tempArray[0];
-  var tempArray = await modelEvent
+  //Ищем смену по идентификатору
+  var oneShiftArray = await modelShift.find({ _id: shiftId }).limit(1);
+  var tempShift = oneShiftArray[0];
+  //Проверяем, есть ли событие позднее конца смены
+  var olderShiftArray = await modelEvent
     .find({ tsStart: { $gte: tempShift.end } })
     .sort("tsStart")
     .limit(1);
-  if (tempArray.length > 0) {
-    tempArray = await modelEvent
+  if (olderShiftArray.length > 0) {
+    var tempArray = await modelEvent
       .find({ tsStart: { $gte: tempShift.start, $lt: tempShift.end } })
       .sort("tsStart");
+    console.log(tempShift.start, tempShift.end);
     var ackInTimeEventsCount = 0;
     var ackNotInTimeEventsCount = 0;
     var tooShortEventsCount = 0;
     var noAckEventsCount = 0;
+    var freeDurationSum = 0;
     for (i in tempArray) {
       if (tempArray[i].tsAck > 0) {
         if (tempArray[i].freeDuration <= maxAckTime) {
+          freeDurationSum += tempArray[i].freeDuration;
           ackInTimeEventsCount++;
         } else {
+          freeDurationSum += tempArray[i].freeDuration;
           ackNotInTimeEventsCount++;
         }
       } else {
         if (tempArray[i].freeDuration <= maxAckTime) {
           tooShortEventsCount++;
         } else {
+          freeDurationSum += tempArray[i].freeDuration;
           noAckEventsCount++;
         }
       }
@@ -442,9 +459,11 @@ async function calculateScoringForShift(shiftId) {
         ackNotInTimeEventsCount: ackNotInTimeEventsCount,
         noAckEventsCount: noAckEventsCount,
         tooShortEventsCount: tooShortEventsCount,
-        normalEventsCount: tempArray.length - tooShortEventsCount
+        normalEventsCount: tempArray.length - tooShortEventsCount,
+        freeDurationSum: freeDurationSum
       }
     );
+    console.log(freeDurationSum);
   }
 }
 //Расчитать показатели для всех смен за месяц
