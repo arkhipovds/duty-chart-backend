@@ -9,7 +9,7 @@ const parameters = new Object({
   DBName: "test"
 });
 
-//Макс. время реакции
+//Макс. время реакции (мс)
 var maxAckTime = 1000 * 60 * 10;
 
 parameters.host = process.argv[2] ? process.argv[2] : "localhost";
@@ -75,7 +75,7 @@ const eventSchema = new mongoose.Schema({
   //Timestamp of event's end
   tsEnd: Number,
   //User login in Active Directory
-  ADlogin: String,
+  ADLogin: String,
   //Event's text
   text: String,
   //Event's host
@@ -153,7 +153,7 @@ const typeDefs = gql`
     tsStart: String
     tsAck: String
     tsEnd: String
-    ADlogin: String
+    ADLogin: String
     text: String
     host: String
     severity: String
@@ -258,7 +258,7 @@ const resolvers = {
         end,
         employeeId
       }).save();
-      calculateScoringForShift(newShift._id);
+      await calculateScoringForShift(newShift._id);
       return newShift;
     },
     //TODO запретить смены длиннее 48 часов и отрицательные смены
@@ -272,7 +272,7 @@ const resolvers = {
         },
         { new: true }
       );
-      calculateScoringForShift(shift._id);
+      await calculateScoringForShift(shift._id);
       return shift;
     },
     deleteShift: async (_, { id }, { Shift }) => {
@@ -416,68 +416,93 @@ async function thisMonthEmployeesId(TS) {
 }
 //Расчитать показатели для смены
 async function calculateScoringForShift(shiftId) {
-  //Ищем смену по идентификатору
+  //Ищем смену по идентификатору  //TODO написать обработчики пустого ответа
   var oneShiftArray = await modelShift.find({ _id: shiftId }).limit(1);
-  var tempShift = oneShiftArray[0];
-  //Проверяем, есть ли событие позднее конца смены
-  var olderShiftArray = await modelEvent
-    .find({ tsStart: { $gte: tempShift.end } })
-    .sort("tsStart")
+  var shift = oneShiftArray[0];
+  var oneEmployeeArray = await modelEmployee
+    .find({ _id: shift.employeeId })
     .limit(1);
-  if (olderShiftArray.length > 0) {
-    var tempArray = await modelEvent
-      .find({ tsStart: { $gte: tempShift.start, $lt: tempShift.end } })
-      .sort("tsStart");
-    console.log(tempShift.start, tempShift.end);
-    var ackInTimeEventsCount = 0;
-    var ackNotInTimeEventsCount = 0;
-    var tooShortEventsCount = 0;
-    var noAckEventsCount = 0;
-    var freeDurationSum = 0;
-    for (i in tempArray) {
-      if (tempArray[i].tsAck > 0) {
-        if (tempArray[i].freeDuration <= maxAckTime) {
-          freeDurationSum += tempArray[i].freeDuration;
-          ackInTimeEventsCount++;
-        } else {
-          freeDurationSum += tempArray[i].freeDuration;
+  var employee = oneEmployeeArray[0];
+
+  var events = await modelEvent
+    .find({
+      tsStart: {
+        $gte: Number.parseInt(shift.start),
+        $lt: Number.parseInt(shift.end)
+      }
+    })
+    .sort("tsStart");
+  /*
+    console.log(
+    "Start " +
+      msToDateString(shift.start) +
+      ", end " +
+      msToDateString(shift.end) +
+      ", length " +
+      events.length
+  );*/
+  var ackInTimeEventsCount = 0;
+  var ackNotInTimeEventsCount = 0;
+  var tooShortEventsCount = 0;
+  var noAckEventsCount = 0;
+  var freeDurationSum = 0;
+  for (i in events) { 
+    //Если событие подтверждено
+    if (events[i].tsAck > 0) {
+      //Если успели подтвердить вовремя
+      if (events[i].freeDuration <= maxAckTime) {
+        freeDurationSum += events[i].freeDuration;
+        ackInTimeEventsCount++;
+      }
+      //Если подтвердили, но не вовремя
+      else {
+        //Если подтвердил тот, чья была смена
+        if (events[i].ADLogin === employee.ADLogin) {
+          freeDurationSum += events[i].freeDuration;
           ackNotInTimeEventsCount++;
         }
-      } else {
-        if (tempArray[i].freeDuration <= maxAckTime) {
-          tooShortEventsCount++;
-        } else {
-          freeDurationSum += tempArray[i].freeDuration;
+        //Если подтвердил не тот, чья была смена
+        else {
           noAckEventsCount++;
         }
       }
     }
-    await modelShift.findOneAndUpdate(
-      { _id: shiftId },
-      {
-        ackInTimeEventsCount: ackInTimeEventsCount,
-        ackNotInTimeEventsCount: ackNotInTimeEventsCount,
-        noAckEventsCount: noAckEventsCount,
-        tooShortEventsCount: tooShortEventsCount,
-        normalEventsCount: tempArray.length - tooShortEventsCount,
-        freeDurationSum: freeDurationSum
+    //Если событие не подтверждено
+    else {
+      if (events[i].freeDuration <= maxAckTime) {
+        tooShortEventsCount++;
+      } else {
+        noAckEventsCount++;
       }
-    );
-    console.log(freeDurationSum);
+    }
   }
+  await modelShift.findOneAndUpdate(
+    { _id: shiftId },
+    {
+      ackInTimeEventsCount: ackInTimeEventsCount,
+      ackNotInTimeEventsCount: ackNotInTimeEventsCount,
+      noAckEventsCount: noAckEventsCount,
+      tooShortEventsCount: tooShortEventsCount,
+      normalEventsCount: events.length - tooShortEventsCount,
+      freeDurationSum: freeDurationSum
+    }
+  );
+  //console.log(freeDurationSum);
 }
 //Расчитать показатели для всех смен за месяц
 async function calculateScoringsForShiftsForMonth(TS) {
   //Ищем края месяца
   const month = getMonthsBorders(TS);
   //Собираем список смен за месяц
-  const shifts = await modelShift.find({
-    start: { $gte: month.start, $lt: month.end }
-  });
+  const shifts = await modelShift
+    .find({
+      start: { $gte: month.start, $lt: month.end }
+    })
+    .sort("start");
   //Перебираем смены
   for (i in shifts) {
     //Для каждой смены считаем показатели
-    calculateScoringForShift(shifts[i]._id);
+    await calculateScoringForShift(shifts[i]._id);
   }
 }
 function getMonthsBorders(TS) {
@@ -487,4 +512,15 @@ function getMonthsBorders(TS) {
   //Расчитываем конец месяца
   var theEnd = new Date(theStart.getFullYear(), theStart.getMonth() + 1);
   return { start: theStart.getTime(), end: theEnd.getTime() };
+}
+//Преобразовывает UNIX-time (в мс) в строку в формате "YYYY-MM-DD HH:MM"
+function msToDateString(ms) {
+  if (ms > 0) {
+    const tempDate = new Date(Number.parseInt(ms));
+    const tempString =
+      tempDate.toISOString().slice(0, 10) +
+      " " +
+      tempDate.toISOString().slice(11, 16);
+    return tempString;
+  } else return "-";
 }
