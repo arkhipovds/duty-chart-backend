@@ -446,7 +446,7 @@ async function calculateScoringForShift(shiftId) {
   var tooShortEventsCount = 0;
   var noAckEventsCount = 0;
   var freeDurationSum = 0;
-  for (i in events) { 
+  for (i in events) {
     //Если событие подтверждено
     if (events[i].tsAck > 0) {
       //Если успели подтвердить вовремя
