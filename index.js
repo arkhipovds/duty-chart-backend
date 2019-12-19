@@ -382,6 +382,7 @@ const resolvers = {
         }
       }
       k++;
+      console.log("Recalculation completed" + new Date());
       return k.toString();
     }
   }
