@@ -2,14 +2,15 @@
   "name": "duty-chart-backend",
   "version": "1.0.0",
   "description": "GraphQL-backend для графика дежурств",
-  "main": "index.js",
+  "main": "./src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon index.js localhost 4000"
+    "start": "nodemon ./src/index.js localhost 4000"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "apollo-boost": "^0.4.7",
     "apollo-server": "2.1.0",
     "graphql": "14.0.2",
     "mongoose": "5.6.3"

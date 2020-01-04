@@ -2,91 +2,25 @@
 const { ApolloServer, gql } = require("apollo-server");
 const mongoose = require("mongoose");
 
-//server's parameters
-const parameters = new Object({
-  DBHost: "10.76.70.51",
-  DBPort: "27017",
-  DBName: "test"
-});
+const typeDefs = require("./graphQL.js");
+const employeeSchema = require("./schemas/employeeSchema.js");
+const shiftSchema = require("./schemas/shiftSchema.js");
+const scoringSchema = require("./schemas/scoringSchema.js");
+const eventSchema = require("./schemas/eventSchema.js");
 
-//Макс. время реакции (мс)
-var maxAckTime = 1000 * 60 * 10;
-
-parameters.host = process.argv[2] ? process.argv[2] : "localhost";
-parameters.port = process.argv[3] ? process.argv[3] : "4000";
-
-//Determine structure for employees
-const employeeSchema = new mongoose.Schema({
-  fullName: {
-    type: String,
-    required: true
+//Конфигурация
+const configuration = {
+  mongodb: {
+    DBHost: "10.76.70.51",
+    DBPort: "27017",
+    DBName: "test"
   },
-  ADLogin: String,
-  isRegular: Boolean,
-  visibleColor: String,
-  isActive: {
-    type: Boolean,
-    default: true
-  }
-});
-//Determine structure for shifts
-const shiftSchema = new mongoose.Schema({
-  start: Number,
-  end: Number,
-  employeeId: String,
-  //События, подтвержденные вовремя
-  ackInTimeEventsCount: Number,
-  //События, подтвержденные невовремя
-  ackNotInTimeEventsCount: Number,
-  //Неподтвержденные события
-  noAckEventsCount: Number,
-  //Слишком короткие события
-  tooShortEventsCount: Number,
-  //Всего событий за смену
-  normalEventsCount: Number,
-  //Суммарная длительность, когда события оставались без подтверждения
-  freeDurationSum: Number
-});
-//Determine structure for scoring
-const scoringSchema = new mongoose.Schema({
-  //Id оцениваемого сотрудника
-  employeeId: String,
-  //Момент внутри месяца, за который посталвена оценка
-  TS: String,
-  //События, подтвержденные вовремя
-  ackInTimeEventsCount: Number,
-  //События, подтвержденные невовремя
-  ackNotInTimeEventsCount: Number,
-  //Неподтвержденные события
-  noAckEventsCount: Number,
-  //Слишком короткие события
-  tooShortEventsCount: Number,
-  //Всего событий
-  normalEventsCount: Number,
-  //Суммарная длительность, когда события оставались без подтверждения
-  freeDurationSum: Number
-});
-//Determine structure for events
-const eventSchema = new mongoose.Schema({
-  //Timestamp of event's start
-  tsStart: Number,
-  //Timestamp of event's ack
-  tsAck: Number,
-  //Timestamp of event's end
-  tsEnd: Number,
-  //User login in Active Directory
-  ADLogin: String,
-  //Event's text
-  text: String,
-  //Event's host
-  host: String,
-  //Event's severity
-  severity: Number,
-  //Duration without check
-  freeDuration: Number,
-  //Is user forgiven ))
-  isForgiven: Boolean
-});
+  server: {
+    host: process.argv[2] ? process.argv[2] : "localhost",
+    port: process.argv[3] ? process.argv[3] : "4000"
+  },
+  maxAckTime: 60 * 10 //Макс. время реакции (с)
+};
 
 //Compile model with schema "employeeSchema" and collection name "Employees"
 const modelEmployee = mongoose.model("Employees", employeeSchema);
@@ -101,104 +35,21 @@ const modelScoring = mongoose.model("Scoring", scoringSchema);
 mongoose
   .connect(
     "mongodb://" +
-      parameters.DBHost +
+      configuration.mongodb.DBHost +
       ":" +
-      parameters.DBPort +
+      configuration.mongodb.DBPort +
       "/" +
-      parameters.DBName +
+      configuration.mongodb.DBName +
       "?retryWrites=true&w=majority",
     {
       useNewUrlParser: true,
       useFindAndModify: false
     }
   )
-  .then(() => console.log('Connected to DB "' + parameters.DBName + '"'))
+  .then(() =>
+    console.log('Connected to DB "' + configuration.mongodb.DBName + '"')
+  )
   .catch(err => console.error(err));
-
-//Declare types and queries for graphql-queries
-const typeDefs = gql`
-  type Employee {
-    id: String
-    fullName: String
-    ADLogin: String
-    isRegular: Boolean
-    visibleColor: String
-    isActive: Boolean
-  }
-  type Shift {
-    id: String
-    start: String
-    end: String
-    employeeId: String
-    ackInTimeEventsCount: String
-    ackNotInTimeEventsCount: String
-    noAckEventsCount: String
-    tooShortEventsCount: String
-    normalEventsCount: String
-    freeDurationSum: String
-  }
-  type Scoring {
-    id: String
-    TS: String
-    ackInTimeEventsCount: String
-    ackNotInTimeEventsCount: String
-    noAckEventsCount: String
-    tooShortEventsCount: String
-    normalEventsCount: String
-    freeDurationSum: String
-    employeeId: String
-  }
-  type Event {
-    id: String
-    tsStart: String
-    tsAck: String
-    tsEnd: String
-    ADLogin: String
-    text: String
-    host: String
-    severity: String
-    freeDuration: String
-    isForgiven: Boolean
-  }
-  type Query {
-    Employees: [Employee]
-    activeEmployees: [Employee]
-
-    scorings(TS: String): [Scoring]
-
-    Shifts(TS: String): [Shift]
-
-    events(TS: String, employeeId: String): [Event]
-    maxEventTime: String
-  }
-  type Mutation {
-    addShift(start: String, end: String, employeeId: String): Shift!
-    updateShift(
-      id: String
-      start: String
-      end: String
-      employeeId: String
-    ): Shift!
-    deleteShift(id: String): Boolean!
-
-    addEmployee(
-      fullName: String
-      ADLogin: String
-      isRegular: Boolean
-      visibleColor: String
-    ): Employee!
-    updateEmployee(
-      id: String
-      fullName: String
-      ADLogin: String
-      isRegular: Boolean
-      visibleColor: String
-    ): Employee!
-    deleteEmployee(id: String): Boolean!
-
-    calculateScorings(TS: String): String!
-  }
-`;
 
 //resolvers for graphql
 const resolvers = {
@@ -395,7 +246,7 @@ const server = new ApolloServer({
 });
 //start it
 server
-  .listen({ host: parameters.host, port: parameters.port })
+  .listen({ host: configuration.server.host, port: configuration.server.port })
   .then(({ url }) => {
     console.log(`Ready for GraphQL-queries on ${url}`);
   });
@@ -433,15 +284,6 @@ async function calculateScoringForShift(shiftId) {
       }
     })
     .sort("tsStart");
-  /*
-    console.log(
-    "Start " +
-      msToDateString(shift.start) +
-      ", end " +
-      msToDateString(shift.end) +
-      ", length " +
-      events.length
-  );*/
   var ackInTimeEventsCount = 0;
   var ackNotInTimeEventsCount = 0;
   var tooShortEventsCount = 0;
@@ -451,7 +293,7 @@ async function calculateScoringForShift(shiftId) {
     //Если событие подтверждено
     if (events[i].tsAck > 0) {
       //Если успели подтвердить вовремя
-      if (events[i].freeDuration <= maxAckTime) {
+      if (events[i].freeDuration <= configuration.maxAckTime * 1000) {
         freeDurationSum += events[i].freeDuration;
         ackInTimeEventsCount++;
       }
@@ -470,7 +312,7 @@ async function calculateScoringForShift(shiftId) {
     }
     //Если событие не подтверждено
     else {
-      if (events[i].freeDuration <= maxAckTime) {
+      if (events[i].freeDuration <= configuration.maxAckTime * 1000) {
         tooShortEventsCount++;
       } else {
         noAckEventsCount++;
