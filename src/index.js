@@ -1,12 +1,13 @@
 //Include external modules
-const { ApolloServer, gql } = require("apollo-server");
+const { ApolloServer } = require("apollo-server");
 const mongoose = require("mongoose");
+const fs = require("fs");
 
-const typeDefs = require("./graphQL.js");
-const employeeSchema = require("./schemas/employeeSchema.js");
-const shiftSchema = require("./schemas/shiftSchema.js");
-const scoringSchema = require("./schemas/scoringSchema.js");
-const eventSchema = require("./schemas/eventSchema.js");
+const typeDefs = require("./graphQL/declarations.js");
+const employeeSchema = require("./DBSchemas/employeeSchema.js");
+const shiftSchema = require("./DBSchemas/shiftSchema.js");
+const scoringSchema = require("./DBSchemas/scoringSchema.js");
+const eventSchema = require("./DBSchemas/eventSchema.js");
 
 //Конфигурация
 const configuration = {
@@ -19,7 +20,8 @@ const configuration = {
     host: process.argv[2] ? process.argv[2] : "localhost",
     port: process.argv[3] ? process.argv[3] : "4000"
   },
-  maxAckTime: 60 * 10 //Макс. время реакции (с)
+  maxAckTime: 60 * 10, //Макс. время реакции дежурного (с)
+  shiftsOffset: 60 * 60 * 24 * 40 //отклонение от таймстемпа при запросе списка смен (с)
 };
 
 //Compile model with schema "employeeSchema" and collection name "Employees"
@@ -54,7 +56,7 @@ mongoose
 //resolvers for graphql
 const resolvers = {
   Query: {
-    Employees: async (_, args, { Employee }) => {
+    employees: async (_, args, { Employee }) => {
       const employees = await modelEmployee.find();
       return employees;
     },
@@ -62,22 +64,16 @@ const resolvers = {
       const employees = await modelEmployee.find({ isActive: true });
       return employees;
     },
-    scorings: async (_, { TS }, { Shift }) => {
-      const month = getMonthsBorders(TS);
-      const scorings = await modelScoring.find({
-        TS: { $gte: month.start, $lt: month.end }
-      });
-      return scorings;
-    },
-    Shifts: async (_, { TS }, { Shift }) => {
-      //Задаем отклонение от указанного времени 40 суток
-      const delta = 1000 * 60 * 60 * 24 * 40;
+    shifts: async (_, { TS }, { Shift }) => {
       const days = await modelShift.find({
-        start: { $gte: TS - delta, $lt: TS + delta }
+        start: {
+          $gte: TS - configuration.shiftsOffset * 1000,
+          $lt: TS + configuration.shiftsOffset * 1000
+        }
       });
       return days;
     },
-    events: async (_, { TS, employeeId }, { Event }) => {
+    events: async (_, { TS, employeeId, ackType }, { Event }) => {
       const month = getMonthsBorders(TS);
       const shifts = await modelShift.find({
         start: { $gte: month.start, $lt: month.end },
@@ -87,18 +83,19 @@ const resolvers = {
       for (i in shifts) {
         events = events.concat(
           await modelEvent.find({
-            tsStart: { $gte: shifts[i].start, $lt: shifts[i].end }
+            tsStart: { $gte: shifts[i].start, $lt: shifts[i].end },
+            ackType: ackType
           })
         );
       }
       return events;
     },
-    maxEventTime: async (_, args, { Event }) => {
-      const maxTS = await modelEvent
-        .find()
-        .sort("-tsStart")
-        .limit(1);
-      return maxTS[0].tsStart;
+    scorings: async (_, { TS }, { Shift }) => {
+      const month = getMonthsBorders(TS);
+      const scorings = await modelScoring.find({
+        TS: { $gte: month.start, $lt: month.end }
+      });
+      return scorings;
     }
   },
   Mutation: {
@@ -109,7 +106,7 @@ const resolvers = {
         end,
         employeeId
       }).save();
-      await calculateScoringForShift(newShift._id);
+      await updateScoringForShift(newShift._id);
       return newShift;
     },
     //TODO запретить смены длиннее 48 часов и отрицательные смены
@@ -123,7 +120,7 @@ const resolvers = {
         },
         { new: true }
       );
-      await calculateScoringForShift(shift._id);
+      await updateScoringForShift(shift._id);
       return shift;
     },
     deleteShift: async (_, { id }, { Shift }) => {
@@ -170,11 +167,11 @@ const resolvers = {
       );
       return employee ? true : false;
     },
-    calculateScorings: async (_, { TS }, { Employee }) => {
+    updateScorings: async (_, { TS }, { Employee }) => {
       //Ищем края месяца
       const month = getMonthsBorders(TS);
       //Для всех смен в месяце считаем показатели
-      await calculateScoringsForShiftsForMonth(TS);
+      await updateScoringsForShiftsForMonth(TS);
       //Собираем список сотрудников
       var ids = await thisMonthEmployeesId(TS);
       //Перебираем сотрудников
@@ -199,38 +196,22 @@ const resolvers = {
             freeDurationSum += shifts[i].freeDurationSum;
           }
         }
-        //Ищем оценку по этому сотруднику за этот месяц
-        var scoring = await modelScoring.find({
+        //Удаляем старую оценку сотрудника
+        await modelScoring.remove({
           TS: { $gte: month.start, $lt: month.end },
           employeeId: ids[k]
         });
-        if (scoring.length > 0) {
-          scoring = await modelScoring.findOneAndUpdate(
-            { _id: scoring[0]._id },
-            {
-              employeeId: ids[k],
-              TS: month.start,
-              ackInTimeEventsCount: ackInTimeEventsCount,
-              ackNotInTimeEventsCount: ackNotInTimeEventsCount,
-              noAckEventsCount: noAckEventsCount,
-              tooShortEventsCount: tooShortEventsCount,
-              normalEventsCount: normalEventsCount,
-              freeDurationSum: freeDurationSum
-            },
-            { new: true }
-          );
-        } else {
-          await new modelScoring({
-            employeeId: ids[k],
-            TS: month.start,
-            ackInTimeEventsCount: ackInTimeEventsCount,
-            ackNotInTimeEventsCount: ackNotInTimeEventsCount,
-            noAckEventsCount: noAckEventsCount,
-            tooShortEventsCount: tooShortEventsCount,
-            normalEventsCount: normalEventsCount,
-            freeDurationSum: freeDurationSum
-          }).save();
-        }
+        //Добавляем новую оценку
+        await new modelScoring({
+          employeeId: ids[k],
+          TS: month.start,
+          ackInTimeEventsCount: ackInTimeEventsCount,
+          ackNotInTimeEventsCount: ackNotInTimeEventsCount,
+          noAckEventsCount: noAckEventsCount,
+          tooShortEventsCount: tooShortEventsCount,
+          normalEventsCount: normalEventsCount,
+          freeDurationSum: freeDurationSum
+        }).save();
       }
       k++;
       console.log("Recalculation completed" + new Date());
@@ -238,18 +219,6 @@ const resolvers = {
     }
   }
 };
-//create new Apollo server
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  context: { modelEmployee }
-});
-//start it
-server
-  .listen({ host: configuration.server.host, port: configuration.server.port })
-  .then(({ url }) => {
-    console.log(`Ready for GraphQL-queries on ${url}`);
-  });
 //Для указанного месяца выдает список id сотрудников, которые дежурили
 async function thisMonthEmployeesId(TS) {
   const month = getMonthsBorders(TS);
@@ -267,16 +236,17 @@ async function thisMonthEmployeesId(TS) {
   return ids;
 }
 //Расчитать показатели для смены
-async function calculateScoringForShift(shiftId) {
+async function updateScoringForShift(shiftId) {
   //Ищем смену по идентификатору  //TODO написать обработчики пустого ответа
-  var oneShiftArray = await modelShift.find({ _id: shiftId }).limit(1);
-  var shift = oneShiftArray[0];
-  var oneEmployeeArray = await modelEmployee
+  let oneShiftArray = await modelShift.find({ _id: shiftId }).limit(1);
+  let shift = oneShiftArray[0];
+  //Ищем сотрудника по идентификатору
+  let oneEmployeeArray = await modelEmployee
     .find({ _id: shift.employeeId })
     .limit(1);
-  var employee = oneEmployeeArray[0];
-
-  var events = await modelEvent
+  let employee = oneEmployeeArray[0];
+  //Выбираем события за смену
+  let events = await modelEvent
     .find({
       tsStart: {
         $gte: Number.parseInt(shift.start),
@@ -284,39 +254,22 @@ async function calculateScoringForShift(shiftId) {
       }
     })
     .sort("tsStart");
-  var ackInTimeEventsCount = 0;
-  var ackNotInTimeEventsCount = 0;
-  var tooShortEventsCount = 0;
-  var noAckEventsCount = 0;
-  var freeDurationSum = 0;
+  let ackInTimeEventsCount = 0;
+  let ackNotInTimeEventsCount = 0;
+  let tooShortEventsCount = 0;
+  let noAckEventsCount = 0;
+  let freeDurationSum = 0;
   for (i in events) {
-    //Если событие подтверждено
-    if (events[i].tsAck > 0) {
-      //Если успели подтвердить вовремя
-      if (events[i].freeDuration <= configuration.maxAckTime * 1000) {
-        freeDurationSum += events[i].freeDuration;
-        ackInTimeEventsCount++;
-      }
-      //Если подтвердили, но не вовремя
-      else {
-        //Если подтвердил тот, чья была смена
-        if (events[i].ADLogin === employee.ADLogin) {
-          freeDurationSum += events[i].freeDuration;
-          ackNotInTimeEventsCount++;
-        }
-        //Если подтвердил не тот, чья была смена
-        else {
-          noAckEventsCount++;
-        }
-      }
-    }
-    //Если событие не подтверждено
-    else {
-      if (events[i].freeDuration <= configuration.maxAckTime * 1000) {
-        tooShortEventsCount++;
-      } else {
-        noAckEventsCount++;
-      }
+    if (events[i].ackType === "inTime") {
+      freeDurationSum += events[i].freeDuration;
+      ackInTimeEventsCount++;
+    } else if (events[i].ackType === "late") {
+      freeDurationSum += events[i].freeDuration;
+      ackNotInTimeEventsCount++;
+    } else if (events[i].ackType === "none") {
+      noAckEventsCount++;
+    } else if (events[i].ackType === "tooShort") {
+      tooShortEventsCount++;
     }
   }
   await modelShift.findOneAndUpdate(
@@ -330,10 +283,9 @@ async function calculateScoringForShift(shiftId) {
       freeDurationSum: freeDurationSum
     }
   );
-  //console.log(freeDurationSum);
 }
 //Расчитать показатели для всех смен за месяц
-async function calculateScoringsForShiftsForMonth(TS) {
+async function updateScoringsForShiftsForMonth(TS) {
   //Ищем края месяца
   const month = getMonthsBorders(TS);
   //Собираем список смен за месяц
@@ -345,25 +297,33 @@ async function calculateScoringsForShiftsForMonth(TS) {
   //Перебираем смены
   for (i in shifts) {
     //Для каждой смены считаем показатели
-    await calculateScoringForShift(shifts[i]._id);
+    await updateScoringForShift(shifts[i]._id);
   }
 }
+//Возвращает таймстемпы начала и конца месяца
 function getMonthsBorders(TS) {
   var theDate = new Date(Number.parseInt(TS));
-  //Расчитываем начало месяца
   var theStart = new Date(theDate.getFullYear(), theDate.getMonth());
-  //Расчитываем конец месяца
   var theEnd = new Date(theStart.getFullYear(), theStart.getMonth() + 1);
   return { start: theStart.getTime(), end: theEnd.getTime() };
 }
-//Преобразовывает UNIX-time (в мс) в строку в формате "YYYY-MM-DD HH:MM"
-function msToDateString(ms) {
-  if (ms > 0) {
-    const tempDate = new Date(Number.parseInt(ms));
-    const tempString =
-      tempDate.toISOString().slice(0, 10) +
-      " " +
-      tempDate.toISOString().slice(11, 16);
-    return tempString;
-  } else return "-";
+
+//create new Apollo server
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+  context: { modelEmployee }
+});
+
+try {
+  var fileContent = fs.readFileSync("./config.txt", "utf8");
+} catch (err) {
+  console.error(err);
 }
+
+//start server
+server
+  .listen({ host: configuration.server.host, port: configuration.server.port })
+  .then(({ url }) => {
+    console.log(`Ready for GraphQL-queries on ${url}`);
+  });

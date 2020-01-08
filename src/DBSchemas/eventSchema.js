@@ -6,20 +6,26 @@ const eventSchema = new mongoose.Schema({
   tsStart: Number,
   //Timestamp of event's ack
   tsAck: Number,
-  //Timestamp of event's end
+  //Timestamp of event's end                        can be updated
   tsEnd: Number,
   //User login in Active Directory
   ADLogin: String,
   //Event's text
   text: String,
+  //Trigger id in zabbix's DB
+  triggerId: Number,
   //Event's host
   host: String,
+  //Event's host's id
+  hostId: String,
   //Event's severity
   severity: Number,
-  //Duration without check
+  //Duration without check                          can be updated
   freeDuration: Number,
-  //Is user forgiven ))
-  isForgiven: Boolean
+  //Acknowledgement type                            can be updated
+  ackType: String, //tooShort, none, late, inTime, maintenance, forgiven, unknown
+  //
+  isFinished: Boolean
 });
 
 module.exports = eventSchema;

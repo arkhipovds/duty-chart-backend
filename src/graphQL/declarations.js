@@ -43,18 +43,15 @@ const typeDefs = gql`
     host: String
     severity: String
     freeDuration: String
-    isForgiven: Boolean
+    ackType: String
+    isFinished: Boolean
   }
   type Query {
-    Employees: [Employee]
+    employees: [Employee]
     activeEmployees: [Employee]
-
     scorings(TS: String): [Scoring]
-
-    Shifts(TS: String): [Shift]
-
-    events(TS: String, employeeId: String): [Event]
-    maxEventTime: String
+    shifts(TS: String): [Shift]
+    events(TS: String, employeeId: String, ackType: String): [Event]
   }
   type Mutation {
     addShift(start: String, end: String, employeeId: String): Shift!
@@ -65,7 +62,6 @@ const typeDefs = gql`
       employeeId: String
     ): Shift!
     deleteShift(id: String): Boolean!
-
     addEmployee(
       fullName: String
       ADLogin: String
@@ -80,8 +76,7 @@ const typeDefs = gql`
       visibleColor: String
     ): Employee!
     deleteEmployee(id: String): Boolean!
-
-    calculateScorings(TS: String): String!
+    updateScorings(TS: String): String!
   }
 `;
 module.exports = typeDefs;
