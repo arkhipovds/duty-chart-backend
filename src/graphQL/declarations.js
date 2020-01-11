@@ -47,8 +47,7 @@ const typeDefs = gql`
     isFinished: Boolean
   }
   type Query {
-    employees: [Employee]
-    activeEmployees: [Employee]
+    employees(type: String): [Employee]
     scorings(TS: String): [Scoring]
     shifts(TS: String): [Shift]
     events(TS: String, employeeId: String, ackType: String): [Event]

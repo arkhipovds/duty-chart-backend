@@ -39,12 +39,13 @@ mongoose
 //resolvers for graphql
 const resolvers = {
   Query: {
-    employees: async (_, args, { Employee }) => {
-      const employees = await modelEmployee.find();
-      return employees;
-    },
-    activeEmployees: async (_, args, { Employee }) => {
-      const employees = await modelEmployee.find({ isActive: true });
+    employees: async (_, { type }, { Employee }) => {
+      let employees = [];
+      if (type === "all") {
+        employees = await modelEmployee.find();
+      } else if (type === "active") {
+        employees = await modelEmployee.find({ isActive: true });
+      } else return [];
       return employees;
     },
     shifts: async (_, { TS }, { Shift }) => {
