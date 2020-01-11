@@ -1,36 +1,19 @@
 //Include external modules
 const { ApolloServer } = require("apollo-server");
 const mongoose = require("mongoose");
-const fs = require("fs");
-
+//GraphQL declarations
 const typeDefs = require("./graphQL/declarations.js");
+//Mongo-schemas declarations
 const employeeSchema = require("./DBSchemas/employeeSchema.js");
 const shiftSchema = require("./DBSchemas/shiftSchema.js");
 const scoringSchema = require("./DBSchemas/scoringSchema.js");
 const eventSchema = require("./DBSchemas/eventSchema.js");
-
-//Конфигурация
-const configuration = {
-  mongodb: {
-    DBHost: "10.76.70.51",
-    DBPort: "27017",
-    DBName: "test"
-  },
-  server: {
-    host: process.argv[2] ? process.argv[2] : "localhost",
-    port: process.argv[3] ? process.argv[3] : "4000"
-  },
-  maxAckTime: 60 * 10, //Макс. время реакции дежурного (с)
-  shiftsOffset: 60 * 60 * 24 * 40 //отклонение от таймстемпа при запросе списка смен (с)
-};
-
-//Compile model with schema "employeeSchema" and collection name "Employees"
+//Configuration
+const configuration = require("./config.js");
+//Compile models, for example with schema "employeeSchema" and collection name "Employees"
 const modelEmployee = mongoose.model("Employees", employeeSchema);
-//Compile model with schema "shiftSchema" and collection name "Shifts"
 const modelShift = mongoose.model("Shifts", shiftSchema);
-//Compile model with schema "eventSchema" and collection name "Events"
 const modelEvent = mongoose.model("Events", eventSchema);
-//Compile model with schema "schemaScoring" and collection name "Scoring"
 const modelScoring = mongoose.model("Scoring", scoringSchema);
 
 //connect to mongodb-server
@@ -187,7 +170,10 @@ const resolvers = {
         var normalEventsCount = 0;
         var freeDurationSum = 0;
         for (i in shifts) {
-          if (shifts[i].normalEventsCount || shifts[i].tooShortEventsCount) {
+          if (
+            shifts[i].normalEventsCount > 0 ||
+            shifts[i].tooShortEventsCount > 0
+          ) {
             ackInTimeEventsCount += shifts[i].ackInTimeEventsCount;
             ackNotInTimeEventsCount += shifts[i].ackNotInTimeEventsCount;
             noAckEventsCount += shifts[i].noAckEventsCount;
@@ -314,12 +300,6 @@ const server = new ApolloServer({
   resolvers,
   context: { modelEmployee }
 });
-
-try {
-  var fileContent = fs.readFileSync("./config.txt", "utf8");
-} catch (err) {
-  console.error(err);
-}
 
 //start server
 server
