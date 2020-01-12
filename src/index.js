@@ -16,26 +16,6 @@ const modelShift = mongoose.model("Shifts", shiftSchema);
 const modelEvent = mongoose.model("Events", eventSchema);
 const modelScoring = mongoose.model("Scoring", scoringSchema);
 
-//connect to mongodb-server
-mongoose
-  .connect(
-    "mongodb://" +
-      configuration.mongodb.DBHost +
-      ":" +
-      configuration.mongodb.DBPort +
-      "/" +
-      configuration.mongodb.DBName +
-      "?retryWrites=true&w=majority",
-    {
-      useNewUrlParser: true,
-      useFindAndModify: false
-    }
-  )
-  .then(() =>
-    console.log('Connected to DB "' + configuration.mongodb.DBName + '"')
-  )
-  .catch(err => console.error(err));
-
 //resolvers for graphql
 const resolvers = {
   Query: {
@@ -154,7 +134,7 @@ const resolvers = {
     updateScorings: async (_, { TS }, { Employee }) => {
       //Ищем края месяца
       const month = getMonthsBorders(TS);
-      //Для всех смен в месяце считаем показатели
+      //Для всех смен в месяце обновляем показатели
       await updateScoringsForShiftsForMonth(TS);
       //Собираем список сотрудников
       var ids = await thisMonthEmployeesId(TS);
@@ -170,6 +150,10 @@ const resolvers = {
         var tooShortEventsCount = 0;
         var normalEventsCount = 0;
         var freeDurationSum = 0;
+        var avgAckTime = 0;
+        var percentAckInTime = 0;
+        var percentAckNotInTime = 0;
+        var percentNoAck = 0;
         for (i in shifts) {
           if (
             shifts[i].normalEventsCount > 0 ||
@@ -183,29 +167,102 @@ const resolvers = {
             freeDurationSum += shifts[i].freeDurationSum;
           }
         }
+        if (normalEventsCount > 0) {
+          //среднее время подтверждения
+          avgAckTime =
+            Math.round((100 * freeDurationSum) / (normalEventsCount * 60000)) /
+            100;
+          //% вовремя подтвержденных
+          percentAckInTime = Math.round(
+            (ackInTimeEventsCount * 100) / normalEventsCount
+          );
+          //% невовремя подтвержденных
+          percentAckNotInTime = Math.round(
+            (ackNotInTimeEventsCount * 100) / normalEventsCount
+          );
+          //% неподтвержденных
+          percentNoAck = Math.round(
+            (noAckEventsCount * 100) / normalEventsCount
+          );
+        } else {
+          avgAckTime = 0;
+          percentAckInTime = 0;
+          percentAckNotInTime = 0;
+          percentNoAck = 0;
+        }
         //Удаляем старую оценку сотрудника
-        await modelScoring.remove({
+        await modelScoring.deleteMany({
           TS: { $gte: month.start, $lt: month.end },
           employeeId: ids[k]
         });
         //Добавляем новую оценку
         await new modelScoring({
           employeeId: ids[k],
+          employeeFullName: await nameOfEmployee(ids[k]),
           TS: month.start,
           ackInTimeEventsCount: ackInTimeEventsCount,
           ackNotInTimeEventsCount: ackNotInTimeEventsCount,
           noAckEventsCount: noAckEventsCount,
           tooShortEventsCount: tooShortEventsCount,
           normalEventsCount: normalEventsCount,
-          freeDurationSum: freeDurationSum
+          freeDurationSum: freeDurationSum,
+          avgAckTime: avgAckTime,
+          percentAckInTime: percentAckInTime,
+          percentAckNotInTime: percentAckNotInTime,
+          percentNoAck: percentNoAck
         }).save();
       }
+      await giveMedals(TS);
       k++;
       console.log("Recalculation completed" + new Date());
       return k.toString();
     }
   }
 };
+//Раздает медали сотрудникам
+async function giveMedals(TS) {
+  const month = getMonthsBorders(TS);
+  var scoringsMedals = [];
+  var scorings = await modelScoring.find({
+    TS: { $gte: month.start, $lt: month.end }
+  });
+  if (scorings.length > 0) {
+    //TODO учесть вариант массива с нолями
+    var theQuickest = { item: scorings[0], index: 0 };
+    var theBest = { item: scorings[0], index: 0 };
+    for (var i in scorings) {
+      if (scorings[i].avgAckTime > 0)
+        if (scorings[i].avgAckTime < theQuickest.item.avgAckTime)
+          theQuickest = { item: scorings[i], index: i };
+      if (scorings[i].percentAckInTime > theBest.item.percentAckInTime)
+        theBest = { item: scorings[i], index: i };
+      if (scorings[i].percentAckInTime >= configuration.goodAckInTimePercent) {
+        await modelScoring.findOneAndUpdate(
+          { _id: scorings[i]._id },
+          {
+            doneNorm: true
+          },
+          { new: true }
+        );
+      }
+    }
+    await modelScoring.findOneAndUpdate(
+      { _id: scorings[theQuickest.index]._id },
+      {
+        theQuickest: true
+      },
+      { new: true }
+    );
+    await modelScoring.findOneAndUpdate(
+      { _id: scorings[theBest.index]._id },
+      {
+        theBest: true
+      },
+      { new: true }
+    );
+  }
+}
+
 //Для указанного месяца выдает список id сотрудников, которые дежурили
 async function thisMonthEmployeesId(TS) {
   const month = getMonthsBorders(TS);
@@ -227,11 +284,6 @@ async function updateScoringForShift(shiftId) {
   //Ищем смену по идентификатору  //TODO написать обработчики пустого ответа
   let oneShiftArray = await modelShift.find({ _id: shiftId }).limit(1);
   let shift = oneShiftArray[0];
-  //Ищем сотрудника по идентификатору
-  let oneEmployeeArray = await modelEmployee
-    .find({ _id: shift.employeeId })
-    .limit(1);
-  let employee = oneEmployeeArray[0];
   //Выбираем события за смену
   let events = await modelEvent
     .find({
@@ -294,12 +346,44 @@ function getMonthsBorders(TS) {
   var theEnd = new Date(theStart.getFullYear(), theStart.getMonth() + 1);
   return { start: theStart.getTime(), end: theEnd.getTime() };
 }
+//Возвращает полное имя сотрудника по id
+async function nameOfEmployee(employeeId) {
+  let name = "";
+  let employees = await modelEmployee.find();
+  if (employees) {
+    if (employees.length > 0) {
+      name =
+        employees[employees.findIndex(el => el.id === employeeId)].fullName;
+    }
+  }
+  return name;
+}
+
+//connect to mongodb-server
+mongoose
+  .connect(
+    "mongodb://" +
+      configuration.mongodb.DBHost +
+      ":" +
+      configuration.mongodb.DBPort +
+      "/" +
+      configuration.mongodb.DBName +
+      "?retryWrites=true&w=majority",
+    {
+      useNewUrlParser: true,
+      useFindAndModify: false
+    }
+  )
+  .then(() =>
+    console.log('Connected to DB "' + configuration.mongodb.DBName + '"')
+  )
+  .catch(err => console.error(err));
 
 //create new Apollo server
 const server = new ApolloServer({
   typeDefs,
   resolvers,
-  context: { modelEmployee }
+  context: { modelEmployee } //TODO зачем это?
 });
 
 //start server

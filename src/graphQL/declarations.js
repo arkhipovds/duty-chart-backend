@@ -32,6 +32,14 @@ const typeDefs = gql`
     normalEventsCount: String
     freeDurationSum: String
     employeeId: String
+    employeeFullName: String
+    avgAckTime: String
+    percentAckInTime: String
+    percentAckNotInTime: String
+    percentNoAck: String
+    theQuickest: Boolean
+    theBest: Boolean
+    doneNorm: Boolean
   }
   type Event {
     id: String
@@ -41,6 +49,7 @@ const typeDefs = gql`
     ADLogin: String
     text: String
     host: String
+    hostId: String
     severity: String
     freeDuration: String
     ackType: String
