@@ -63,7 +63,7 @@ const resolvers = {
     }
   },
   Mutation: {
-    //TODO запретить смены длиннее 48 часов и отрицательные смены
+    //TODO: запретить смены длиннее 48 часов и отрицательные смены, пересчитать показатели?
     addShift: async (_, { start, end, employeeId }, { Shift }) => {
       const newShift = await new modelShift({
         start,
@@ -73,7 +73,7 @@ const resolvers = {
       await updateScoringForShift(newShift._id);
       return newShift;
     },
-    //TODO запретить смены длиннее 48 часов и отрицательные смены
+    //TODO: запретить смены длиннее 48 часов и отрицательные смены, пересчитать показатели?
     updateShift: async (_, { id, start, end, employeeId }, { Shift }) => {
       let shift = await modelShift.findOneAndUpdate(
         { _id: id },
@@ -87,6 +87,7 @@ const resolvers = {
       await updateScoringForShift(shift._id);
       return shift;
     },
+    //TODO: пересчитать показатели?
     deleteShift: async (_, { id }, { Shift }) => {
       shift = await modelShift.findOneAndRemove({ _id: id });
       return shift ? true : false;
@@ -307,7 +308,10 @@ async function updateScoringForShift(shiftId) {
       ackNotInTimeEventsCount++;
     } else if (events[i].ackType === "none") {
       noAckEventsCount++;
-    } else if (events[i].ackType === "tooShort") {
+    } else if (
+      events[i].ackType === "tooShort" ||
+      events[i].ackType === "maintenance"
+    ) {
       tooShortEventsCount++;
     }
   }
