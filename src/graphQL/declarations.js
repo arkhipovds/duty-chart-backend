@@ -84,6 +84,7 @@ const typeDefs = gql`
       visibleColor: String
     ): Employee!
     deleteEmployee(id: String): Boolean!
+    restoreEmployee(id: String): Boolean!
     updateScorings(TS: String): String!
   }
 `;

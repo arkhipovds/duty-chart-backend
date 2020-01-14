@@ -63,31 +63,32 @@ const resolvers = {
     }
   },
   Mutation: {
-    //TODO: запретить смены длиннее 48 часов и отрицательные смены, пересчитать показатели?
     addShift: async (_, { start, end, employeeId }, { Shift }) => {
-      const newShift = await new modelShift({
-        start,
-        end,
-        employeeId
-      }).save();
-      await updateScoringForShift(newShift._id);
-      return newShift;
+      if (isShiftOk(start, end)) {
+        const newShift = await new modelShift({
+          start,
+          end,
+          employeeId
+        }).save();
+        await updateScoringForShift(newShift._id);
+        return newShift;
+      } else return null;
     },
-    //TODO: запретить смены длиннее 48 часов и отрицательные смены, пересчитать показатели?
     updateShift: async (_, { id, start, end, employeeId }, { Shift }) => {
-      let shift = await modelShift.findOneAndUpdate(
-        { _id: id },
-        {
-          start: start,
-          end: end,
-          employeeId: employeeId
-        },
-        { new: true }
-      );
-      await updateScoringForShift(shift._id);
-      return shift;
+      if (isShiftOk(start, end)) {
+        let shift = await modelShift.findOneAndUpdate(
+          { _id: id },
+          {
+            start: start,
+            end: end,
+            employeeId: employeeId
+          },
+          { new: true }
+        );
+        await updateScoringForShift(shift._id);
+        return shift;
+      } else return null;
     },
-    //TODO: пересчитать показатели?
     deleteShift: async (_, { id }, { Shift }) => {
       shift = await modelShift.findOneAndRemove({ _id: id });
       return shift ? true : false;
@@ -127,6 +128,16 @@ const resolvers = {
         { _id: id },
         {
           isActive: false
+        },
+        { new: true }
+      );
+      return employee ? true : false;
+    },
+    restoreEmployee: async (_, { id }, { Employee }) => {
+      let employee = await modelEmployee.findOneAndUpdate(
+        { _id: id },
+        {
+          isActive: true
         },
         { new: true }
       );
@@ -282,8 +293,12 @@ async function thisMonthEmployeesId(TS) {
 }
 //Расчитать показатели для смены
 async function updateScoringForShift(shiftId) {
-  //Ищем смену по идентификатору  //TODO написать обработчики пустого ответа
+  //Ищем смену по идентификатору
   let oneShiftArray = await modelShift.find({ _id: shiftId }).limit(1);
+  if (oneShiftArray.length < 1) {
+    console.log("Ошибка! Не найдена смена по идентификатору.");
+    return;
+  }
   let shift = oneShiftArray[0];
   //Выбираем события за смену
   let events = await modelEvent
@@ -362,7 +377,22 @@ async function nameOfEmployee(employeeId) {
   }
   return name;
 }
-
+//Проверяет корректность начала и конца смены. True - ок, false - ошибка
+function isShiftOk(start, end) {
+  if (start > end) {
+    console.log("Ошибка! Начало смены не может быть позднее конца.");
+    return false;
+  }
+  if (end - start == 0) {
+    console.log("Ошибка! Смена не может быть нулевой длины.");
+    return false;
+  }
+  if (end - start > 24 * 60 * 60 * 1000) {
+    console.log("Ошибка! Смена не может длиться более 24 часов.");
+    return false;
+  }
+  return true;
+}
 //connect to mongodb-server
 mongoose
   .connect(
@@ -386,8 +416,8 @@ mongoose
 //create new Apollo server
 const server = new ApolloServer({
   typeDefs,
-  resolvers,
-  context: { modelEmployee } //TODO зачем это?
+  resolvers
+  //context: { modelEmployee } //TODO зачем это?
 });
 
 //start server

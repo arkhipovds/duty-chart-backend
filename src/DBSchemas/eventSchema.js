@@ -25,6 +25,8 @@ const eventSchema = new mongoose.Schema({
   //Acknowledgement type                            can be updated
   ackType: String, //tooShort, none, late, inTime, maintenance, forgiven, unknown
   //
+  isForgiven: Boolean,
+  //
   isFinished: Boolean
 });
 
