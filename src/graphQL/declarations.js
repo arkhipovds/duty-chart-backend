@@ -40,6 +40,7 @@ const typeDefs = gql`
     theQuickest: Boolean
     theBest: Boolean
     doneNorm: Boolean
+    isRelevant: Boolean
   }
   type Event {
     id: String

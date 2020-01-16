@@ -42,6 +42,10 @@ const scoringSchema = new mongoose.Schema({
   doneNorm: {
     type: Boolean,
     default: false
+  },
+  isRelevant: {
+    type: Boolean,
+    default: false
   }
 });
 

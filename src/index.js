@@ -29,15 +29,18 @@ const resolvers = {
       return employees;
     },
     shifts: async (_, { TS }, { Shift }) => {
-      const days = await modelShift.find({
+      const shifts = await modelShift.find({
         start: {
           $gte: TS - configuration.shiftsOffset * 1000,
           $lt: TS + configuration.shiftsOffset * 1000
         }
       });
-      return days;
+      return shifts;
     },
     events: async (_, { TS, employeeId, ackType }, { Event }) => {
+      if (ackType === "") {
+        ackType = { $exists: true };
+      }
       const month = getMonthsBorders(TS);
       const shifts = await modelShift.find({
         start: { $gte: month.start, $lt: month.end },
@@ -71,6 +74,7 @@ const resolvers = {
           employeeId
         }).save();
         await updateScoringForShift(newShift._id);
+        staleEmployeeScoring(start, employeeId);
         return newShift;
       } else return null;
     },
@@ -86,12 +90,16 @@ const resolvers = {
           { new: true }
         );
         await updateScoringForShift(shift._id);
+        staleEmployeeScoring(start, employeeId);
         return shift;
       } else return null;
     },
     deleteShift: async (_, { id }, { Shift }) => {
       shift = await modelShift.findOneAndRemove({ _id: id });
-      return shift ? true : false;
+      if (shift) {
+        staleEmployeeScoring(shift.start, shift.employeeId);
+        return true;
+      } else return false;
     },
     addEmployee: async (
       _,
@@ -221,7 +229,8 @@ const resolvers = {
           avgAckTime: avgAckTime,
           percentAckInTime: percentAckInTime,
           percentAckNotInTime: percentAckNotInTime,
-          percentNoAck: percentNoAck
+          percentNoAck: percentNoAck,
+          isRelevant: true
         }).save();
       }
       await giveMedals(TS);
@@ -231,50 +240,75 @@ const resolvers = {
     }
   }
 };
+//По id сотрудника и таймстемпу находит оценку сотрудника и помечает ее как устаревшую
+async function staleEmployeeScoring(shiftStart, employeeId) {
+  //Ищем начало месяца
+  const monthStart = getMonthsBorders(shiftStart).start;
+
+  let scoring = await modelScoring.findOneAndUpdate(
+    { TS: monthStart, employeeId: employeeId },
+    {
+      isRelevant: false
+    },
+    { new: true }
+  );
+  if (scoring) {
+    return true;
+  }
+}
 //Раздает медали сотрудникам
 async function giveMedals(TS) {
   const month = getMonthsBorders(TS);
-  var scoringsMedals = [];
   var scorings = await modelScoring.find({
     TS: { $gte: month.start, $lt: month.end }
   });
   if (scorings.length > 0) {
-    //TODO учесть вариант массива с нолями
-    var theQuickest = { item: scorings[0], index: 0 };
-    var theBest = { item: scorings[0], index: 0 };
-    for (var i in scorings) {
-      if (scorings[i].avgAckTime > 0)
-        if (scorings[i].avgAckTime < theQuickest.item.avgAckTime)
-          theQuickest = { item: scorings[i], index: i };
-      if (scorings[i].percentAckInTime > theBest.item.percentAckInTime)
-        theBest = { item: scorings[i], index: i };
-      if (scorings[i].percentAckInTime >= configuration.goodAckInTimePercent) {
-        await modelScoring.findOneAndUpdate(
-          { _id: scorings[i]._id },
-          {
-            doneNorm: true
-          },
-          { new: true }
-        );
+    //Ищем в оценках есть хоть одно событие
+    let isEmpty = true;
+    for (let item of scorings) {
+      if (item.normalEventsCount > 0) {
+        isEmpty = false;
       }
     }
-    await modelScoring.findOneAndUpdate(
-      { _id: scorings[theQuickest.index]._id },
-      {
-        theQuickest: true
-      },
-      { new: true }
-    );
-    await modelScoring.findOneAndUpdate(
-      { _id: scorings[theBest.index]._id },
-      {
-        theBest: true
-      },
-      { new: true }
-    );
+    //Если в оценках есть хоть одно событие
+    if (!isEmpty) {
+      var theQuickest = { item: scorings[0], index: 0 };
+      var theBest = { item: scorings[0], index: 0 };
+      for (var i in scorings) {
+        if (scorings[i].avgAckTime > 0)
+          if (scorings[i].avgAckTime < theQuickest.item.avgAckTime)
+            theQuickest = { item: scorings[i], index: i };
+        if (scorings[i].percentAckInTime > theBest.item.percentAckInTime)
+          theBest = { item: scorings[i], index: i };
+        if (
+          scorings[i].percentAckInTime >= configuration.goodAckInTimePercent
+        ) {
+          await modelScoring.findOneAndUpdate(
+            { _id: scorings[i]._id },
+            {
+              doneNorm: true
+            },
+            { new: true }
+          );
+        }
+      }
+      await modelScoring.findOneAndUpdate(
+        { _id: scorings[theQuickest.index]._id },
+        {
+          theQuickest: true
+        },
+        { new: true }
+      );
+      await modelScoring.findOneAndUpdate(
+        { _id: scorings[theBest.index]._id },
+        {
+          theBest: true
+        },
+        { new: true }
+      );
+    }
   }
 }
-
 //Для указанного месяца выдает список id сотрудников, которые дежурили
 async function thisMonthEmployeesId(TS) {
   const month = getMonthsBorders(TS);
@@ -417,7 +451,6 @@ mongoose
 const server = new ApolloServer({
   typeDefs,
   resolvers
-  //context: { modelEmployee } //TODO зачем это?
 });
 
 //start server
