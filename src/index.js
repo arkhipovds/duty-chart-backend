@@ -1,3 +1,6 @@
+//TODO: положить все текстовые конфиги в БД, сделать морду для редактирования
+// показывать в морде состояние импортера данных
+
 //Include external modules
 const { ApolloServer } = require("apollo-server");
 const mongoose = require("mongoose");
