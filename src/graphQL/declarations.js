@@ -61,6 +61,7 @@ const typeDefs = gql`
     scorings(TS: String): [Scoring]
     shifts(TS: String): [Shift]
     events(TS: String, employeeId: String, ackType: String): [Event]
+    lastEventTime: String
   }
   type Mutation {
     addShift(start: String, end: String, employeeId: String): Shift!

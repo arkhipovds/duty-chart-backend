@@ -67,6 +67,23 @@ const resolvers = {
         TS: { $gte: month.start, $lt: month.end }
       });
       return scorings;
+    },
+    lastEventTime: async (_, args, { Event }) => {
+      //Ищем запись с максимальным timestamp в базе  TODO повесить обработку ошибки при запросе
+      const tempArray = await modelEvent
+        .find()
+        .sort("-tsStart")
+        .limit(1)
+        .catch(err => {
+          console.log("Error on query to mongoDB");
+          throw err;
+        });
+      var startPoint = 0;
+      //Если в БД что-то нашлось, то используем, иначе считаем максимумом 0
+      if (tempArray.length > 0) {
+        startPoint = tempArray[0] ? tempArray[0].tsStart : 0;
+      }
+      return startPoint;
     }
   },
   Mutation: {
