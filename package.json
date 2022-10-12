@@ -11,7 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "apollo-boost": "^0.4.7",
-    "apollo-server": "2.1.0",
+    "apollo-server": "2.25.4",
     "fs": "0.0.1-security",
     "graphql": "14.0.2",
     "mongoose": "5.6.3"
